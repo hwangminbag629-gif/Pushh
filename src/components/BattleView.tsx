@@ -16,6 +16,7 @@ import { HexAvatar } from './HexAvatar';
 import { TugOfWarBar } from './TugOfWarBar';
 import { PushupTargetDial } from './PushupTargetDial';
 import { ReactionOverlay } from './ReactionOverlay';
+import { OpponentVideoPIP } from './OpponentVideoPIP';
 import { MatchEndModal } from './MatchEndModal';
 import { soundEffects } from '../lib/audio';
 import { 
@@ -60,11 +61,10 @@ export const BattleView: React.FC<BattleViewProps> = ({
   const [analysis, setAnalysis] = useState<PushupAnalysis | null>(null);
   const [floatingSubtitle, setFloatingSubtitle] = useState('I thought bro would lose 😭');
   const [showSkeleton, setShowSkeleton] = useState(true);
-  const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
   // Refs for video & canvas
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackerRef = useRef<PushupTracker>(new PushupTracker());
   const animationFrameId = useRef<number | null>(null);
@@ -154,14 +154,10 @@ export const BattleView: React.FC<BattleViewProps> = ({
       pc.addTrack(track, stream);
     });
 
-    // When remote track arrives, attach to opponent's video element
+    // When remote track arrives, attach to remoteStream
     pc.ontrack = (event) => {
       if (event.streams && event.streams[0]) {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-          remoteVideoRef.current.play().catch(() => {});
-        }
-        setHasRemoteVideo(true);
+        setRemoteStream(event.streams[0]);
       }
     };
 
@@ -595,62 +591,8 @@ export const BattleView: React.FC<BattleViewProps> = ({
           className="absolute inset-0 w-full h-full object-cover z-10 pointer-events-none -scale-x-100"
         />
 
-        {/* Top-Right: Opponent's Realtime Video Window (대결 상대방 영상) */}
-        <div className="absolute top-3 right-3 z-25 w-36 h-48 sm:w-44 sm:h-56 rounded-2xl overflow-hidden border-2 border-slate-700/90 shadow-2xl bg-slate-950 flex flex-col">
-          {/* Opponent Remote Video Feed */}
-          <div className="relative w-full h-full bg-slate-900 flex items-center justify-center overflow-hidden">
-            <video
-              ref={remoteVideoRef}
-              playsInline
-              autoPlay
-              className={`absolute inset-0 w-full h-full object-cover -scale-x-100 ${
-                hasRemoteVideo ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
-
-            {/* Placeholder / Connecting State if remote stream is pending */}
-            {!hasRemoteVideo && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-2 bg-gradient-to-b from-slate-900 to-slate-950 text-center">
-                <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-amber-400 mb-2 shadow-lg">
-                  <img
-                    src={opponent.avatarUrl}
-                    alt={opponent.name}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-slate-950/20" />
-                </div>
-                <span className="text-[11px] font-black text-white truncate max-w-full px-1">
-                  {opponent.name}
-                </span>
-                <span className="text-[9px] font-bold text-amber-400/90 flex items-center gap-1 mt-0.5 animate-pulse">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  카메라 대기 중...
-                </span>
-              </div>
-            )}
-
-            {/* Top Badge: LIVE & Opponent Score */}
-            <div className="absolute top-1.5 inset-x-1.5 flex items-center justify-between pointer-events-none z-10">
-              <span className="px-1.5 py-0.5 rounded-md bg-rose-600/90 text-white text-[9px] font-black tracking-wider flex items-center gap-1 shadow-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                LIVE
-              </span>
-              <span className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-xs text-amber-400 border border-amber-400/40 text-[10px] font-black shadow-xs">
-                🔥 {opponent.score}회
-              </span>
-            </div>
-
-            {/* Bottom Overlay: Opponent Name */}
-            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-slate-950/90 via-slate-950/50 to-transparent p-1.5 pt-4 pointer-events-none z-10 flex items-center justify-between">
-              <span className="text-[11px] font-black text-white truncate drop-shadow-md">
-                {opponent.name}
-              </span>
-              <span className="text-[9px] font-extrabold text-amber-300">
-                {opponent.elo} ELO
-              </span>
-            </div>
-          </div>
-        </div>
+        {/* Top-Right: FaceTime Style Opponent Realtime Video Call Window */}
+        <OpponentVideoPIP opponent={opponent} remoteStream={remoteStream} />
 
         {/* Dark Vignette Overlay for Contrast */}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-slate-950/40 pointer-events-none z-10" />
