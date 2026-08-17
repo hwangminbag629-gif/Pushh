@@ -1,21 +1,23 @@
 import React, { useRef, useEffect } from 'react';
-import { Wifi, Video } from 'lucide-react';
+import { Wifi, Video, ShieldCheck } from 'lucide-react';
 import { OpponentState } from '../types';
 
 interface OpponentVideoPIPProps {
   opponent: OpponentState;
   remoteStream: MediaStream | null;
+  remoteSnapshot?: string | null;
 }
 
 export const OpponentVideoPIP: React.FC<OpponentVideoPIPProps> = ({
   opponent,
   remoteStream,
+  remoteSnapshot,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Attach remote stream if available
+  // Attach remote WebRTC stream if available
   useEffect(() => {
     if (videoRef.current) {
       if (remoteStream) {
@@ -27,10 +29,9 @@ export const OpponentVideoPIP: React.FC<OpponentVideoPIPProps> = ({
     }
   }, [remoteStream]);
 
-  // If no remote camera stream (e.g. peer joining, bot, or WebRTC negotiating),
-  // render a live simulated camera workout stream onto canvas!
+  // When no remote WebRTC stream and no remote snapshot, render animated live camera feed
   useEffect(() => {
-    if (remoteStream) {
+    if (remoteStream || remoteSnapshot) {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       return;
     }
@@ -55,39 +56,39 @@ export const OpponentVideoPIP: React.FC<OpponentVideoPIPProps> = ({
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // Studio floor line & ambient lighting
+      // Studio floor & ambient lighting
       ctx.fillStyle = 'rgba(250, 204, 21, 0.08)';
       ctx.beginPath();
       ctx.ellipse(width / 2, height * 0.35, width * 0.6, height * 0.3, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Horizontal floor perspective grid
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      // Floor perspective lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(0, height * 0.65);
-      ctx.lineTo(width, height * 0.65);
-      ctx.moveTo(0, height * 0.85);
-      ctx.lineTo(width, height * 0.85);
+      ctx.moveTo(0, height * 0.68);
+      ctx.lineTo(width, height * 0.68);
+      ctx.moveTo(0, height * 0.88);
+      ctx.lineTo(width, height * 0.88);
       ctx.stroke();
 
       // 2. Calculate Pushup Motion based on opponent state & periodic rhythm
-      const cycle = (Math.sin(time * 2.5) + 1) / 2; // 0 (up) to 1 (down)
+      const cycle = (Math.sin(time * 2.8) + 1) / 2; // 0 (up) to 1 (down)
       const pushFactor = opponent.isPushingDown ? 0.85 : cycle;
 
-      const headX = width * 0.32;
-      const shoulderX = width * 0.42;
-      const elbowX = width * 0.44 + pushFactor * 16;
-      const wristX = width * 0.45;
-      const hipX = width * 0.65;
+      const headX = width * 0.30;
+      const shoulderX = width * 0.40;
+      const elbowX = width * 0.43 + pushFactor * 18;
+      const wristX = width * 0.44;
+      const hipX = width * 0.64;
       const feetX = width * 0.88;
 
       // Y positions shift with pushup depth
       const baseY = height * 0.68;
-      const dropY = pushFactor * 26;
+      const dropY = pushFactor * 28;
 
-      const headY = baseY - 45 + dropY;
-      const shoulderY = baseY - 35 + dropY;
+      const headY = baseY - 46 + dropY;
+      const shoulderY = baseY - 36 + dropY;
       const elbowY = baseY - 12 + dropY * 0.4;
       const wristY = baseY + 2;
       const hipY = baseY - 28 + dropY * 0.7;
@@ -168,7 +169,7 @@ export const OpponentVideoPIP: React.FC<OpponentVideoPIPProps> = ({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [remoteStream, opponent.isPushingDown]);
+  }, [remoteStream, remoteSnapshot, opponent.isPushingDown]);
 
   return (
     <div
@@ -177,7 +178,7 @@ export const OpponentVideoPIP: React.FC<OpponentVideoPIPProps> = ({
     >
       {/* Video / Animated Camera Stream Container */}
       <div className="relative w-full h-full bg-slate-950 flex items-center justify-center overflow-hidden">
-        {/* Real Peer WebRTC Video Feed (when peer camera connected) */}
+        {/* Real Peer WebRTC Video Feed */}
         <video
           ref={videoRef}
           playsInline
@@ -188,8 +189,17 @@ export const OpponentVideoPIP: React.FC<OpponentVideoPIPProps> = ({
           }`}
         />
 
+        {/* Realtime Snapshot Feed (Fallback when WebRTC NAT is blocked) */}
+        {!remoteStream && remoteSnapshot && (
+          <img
+            src={remoteSnapshot}
+            alt="Opponent Camera"
+            className="absolute inset-0 w-full h-full object-cover -scale-x-100"
+          />
+        )}
+
         {/* Live Animated Camera Feed Canvas (active pushup live stream) */}
-        {!remoteStream && (
+        {!remoteStream && !remoteSnapshot && (
           <canvas
             ref={canvasRef}
             width={240}

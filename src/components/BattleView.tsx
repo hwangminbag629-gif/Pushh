@@ -62,6 +62,7 @@ export const BattleView: React.FC<BattleViewProps> = ({
   const [floatingSubtitle, setFloatingSubtitle] = useState('I thought bro would lose 😭');
   const [showSkeleton, setShowSkeleton] = useState(true);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [remoteSnapshot, setRemoteSnapshot] = useState<string | null>(null);
 
   // Refs for video & canvas
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -72,6 +73,7 @@ export const BattleView: React.FC<BattleViewProps> = ({
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const botIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const snapshotIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const prevMyScore = useRef(0);
   const prevOpponentScore = useRef(0);
 
@@ -197,37 +199,55 @@ export const BattleView: React.FC<BattleViewProps> = ({
       .on('broadcast', { event: 'chat' }, ({ payload }) => {
         setFloatingSubtitle(payload.text);
       })
-      .on('broadcast', { event: 'webrtc_ready' }, async () => {
-        // Opponent is ready for WebRTC; if we are the host (or initiated), create offer
-        if (localStreamRef.current && room.hostId === myProfile.id) {
-          const pc = setupPeerConnection(localStreamRef.current);
-          const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: false });
-          await pc.setLocalDescription(offer);
-          channel.send({
-            type: 'broadcast',
-            event: 'webrtc_offer',
-            payload: { sdp: offer, sender: myProfile.id },
-          });
+      .on('broadcast', { event: 'camera_frame' }, ({ payload }) => {
+        if (payload && payload.sender !== myProfile.id && payload.image) {
+          setRemoteSnapshot(payload.image);
+        }
+      })
+      .on('broadcast', { event: 'webrtc_ready' }, async ({ payload }) => {
+        if (payload && payload.sender === myProfile.id) return;
+        // Opponent is ready for WebRTC; if we have local stream, create offer
+        if (localStreamRef.current) {
+          try {
+            const pc = setupPeerConnection(localStreamRef.current);
+            const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: false });
+            await pc.setLocalDescription(offer);
+            channel.send({
+              type: 'broadcast',
+              event: 'webrtc_offer',
+              payload: { sdp: offer, sender: myProfile.id },
+            });
+          } catch (e) {
+            console.warn('WebRTC offer failed:', e);
+          }
         }
       })
       .on('broadcast', { event: 'webrtc_offer' }, async ({ payload }) => {
         if (!payload.sdp || payload.sender === myProfile.id) return;
         if (localStreamRef.current) {
-          const pc = setupPeerConnection(localStreamRef.current);
-          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          channel.send({
-            type: 'broadcast',
-            event: 'webrtc_answer',
-            payload: { sdp: answer, sender: myProfile.id },
-          });
+          try {
+            const pc = setupPeerConnection(localStreamRef.current);
+            await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            channel.send({
+              type: 'broadcast',
+              event: 'webrtc_answer',
+              payload: { sdp: answer, sender: myProfile.id },
+            });
+          } catch (e) {
+            console.warn('WebRTC answer failed:', e);
+          }
         }
       })
       .on('broadcast', { event: 'webrtc_answer' }, async ({ payload }) => {
         if (!payload.sdp || payload.sender === myProfile.id) return;
         if (peerConnectionRef.current) {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          try {
+            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          } catch (e) {
+            console.warn('WebRTC setRemoteDescription failed:', e);
+          }
         }
       })
       .on('broadcast', { event: 'webrtc_candidate' }, async ({ payload }) => {
@@ -242,7 +262,6 @@ export const BattleView: React.FC<BattleViewProps> = ({
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          // Notify that we joined and camera stream is ready for P2P video
           channel.send({
             type: 'broadcast',
             event: 'webrtc_ready',
@@ -260,7 +279,7 @@ export const BattleView: React.FC<BattleViewProps> = ({
         peerConnectionRef.current = null;
       }
     };
-  }, [room.code, room.hostId, myProfile.id, setupPeerConnection, triggerReaction]);
+  }, [room.code, myProfile.id, setupPeerConnection, triggerReaction]);
 
   // Bot Simulation if opponent is Bot (like Pedro 3924 ELO from screenshot)
   useEffect(() => {
@@ -374,6 +393,38 @@ export const BattleView: React.FC<BattleViewProps> = ({
           await videoRef.current.play();
         }
 
+        // Notify room that our camera is ready for WebRTC P2P
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'webrtc_ready',
+            payload: { sender: myProfile.id },
+          });
+        }
+
+        // Broadcast lightweight snapshot frames (160x120 JPEG) every 350ms
+        // Ensures opponent camera video shows up seamlessly regardless of WebRTC NAT/STUN conditions
+        const snapshotCanvas = document.createElement('canvas');
+        snapshotCanvas.width = 160;
+        snapshotCanvas.height = 120;
+        const snapCtx = snapshotCanvas.getContext('2d');
+
+        snapshotIntervalRef.current = setInterval(() => {
+          if (videoRef.current && videoRef.current.readyState >= 2 && snapCtx && channelRef.current) {
+            snapCtx.drawImage(videoRef.current, 0, 0, 160, 120);
+            try {
+              const dataUrl = snapshotCanvas.toDataURL('image/jpeg', 0.45);
+              channelRef.current.send({
+                type: 'broadcast',
+                event: 'camera_frame',
+                payload: { image: dataUrl, sender: myProfile.id },
+              });
+            } catch (e) {
+              // ignore frame capture error
+            }
+          }
+        }, 350);
+
         // Initialize MoveNet pose detector
         const detector = await getPoseDetector();
 
@@ -468,6 +519,9 @@ export const BattleView: React.FC<BattleViewProps> = ({
       }
       if (botIntervalRef.current) {
         clearInterval(botIntervalRef.current);
+      }
+      if (snapshotIntervalRef.current) {
+        clearInterval(snapshotIntervalRef.current);
       }
     };
   }, [gameStarted, isGameOver, showSkeleton]);
@@ -592,7 +646,11 @@ export const BattleView: React.FC<BattleViewProps> = ({
         />
 
         {/* Top-Right: FaceTime Style Opponent Realtime Video Call Window */}
-        <OpponentVideoPIP opponent={opponent} remoteStream={remoteStream} />
+        <OpponentVideoPIP
+          opponent={opponent}
+          remoteStream={remoteStream}
+          remoteSnapshot={remoteSnapshot}
+        />
 
         {/* Dark Vignette Overlay for Contrast */}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-slate-950/40 pointer-events-none z-10" />
