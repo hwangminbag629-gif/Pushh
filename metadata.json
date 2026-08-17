@@ -1,0 +1,10 @@
+{
+  "name": "Pushup Battle PvP",
+  "description": "Real-time multiplayer pushup battle game with AI camera pose tracking",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
